@@ -431,10 +431,11 @@ public partial class MainForm : Form
 
         // 测试Oracle连接
         UpdateStatus("正在测试Oracle连接...", Color.Blue);
-        if (!_oracleService.TestConnection(out var error))
+        var (connOk, connError) = await _oracleService.TestConnectionAsync();
+        if (!connOk)
         {
-            _logger.LogError("Oracle连接失败: {Error}", error);
-            MessageBox.Show($"Oracle连接失败: {error}", "连接错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            _logger.LogError("Oracle连接失败: {Error}", connError);
+            MessageBox.Show($"Oracle连接失败: {connError}", "连接错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             UpdateStatus("Oracle连接失败", Color.Red);
             return;
         }
@@ -643,7 +644,7 @@ public partial class MainForm : Form
 
         ReportProgress(progressStart, $"正在统计{viewName}视图总行数...");
 
-        var totalCount = _oracleService.GetTotalCount(viewName, ct);
+        var totalCount = await _oracleService.GetTotalCountAsync(viewName, ct);
         var totalPages = (totalCount + _oracleService.PageSize - 1) / _oracleService.PageSize;
 
         _logger.LogInformation(
@@ -665,7 +666,7 @@ public partial class MainForm : Form
 
             try
             {
-                var data = _oracleService.GetPageData(viewName, startRow, endRow, ct);
+                var data = await _oracleService.GetPageDataAsync(viewName, startRow, endRow, ct);
 
                 // 标记快照类型
                 foreach (var item in data)

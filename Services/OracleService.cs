@@ -37,31 +37,31 @@ public class OracleService
         ConfigurationManager.AppSettings["OracleConnectionString"] ?? string.Empty;
 
     /// <summary>
-    /// 获取视图总行数
+    /// 获取视图总行数（异步）
     /// </summary>
-    public long GetTotalCount(string viewName, CancellationToken ct)
+    public async Task<long> GetTotalCountAsync(string viewName, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         using var conn = new OracleConnection(ConnectionString);
-        conn.Open();
+        await conn.OpenAsync(ct);
 
         var sql = $"SELECT COUNT(*) FROM {EscapeIdentifier(viewName)}";
-        var count = conn.ExecuteScalar<long>(sql);
+        var count = await conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, cancellationToken: ct));
 
         _logger.LogInformation("视图 {ViewName} 总行数: {Count:N0}", viewName, count);
         return count;
     }
 
     /// <summary>
-    /// 分页读取视图数据（中文列名 → 英文属性名映射）
+    /// 分页读取视图数据（异步，中文列名 → 英文属性名映射）
     /// </summary>
-    public List<BomSnapshot> GetPageData(string viewName, long startRow, long endRow, CancellationToken ct)
+    public async Task<List<BomSnapshot>> GetPageDataAsync(string viewName, long startRow, long endRow, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
         using var conn = new OracleConnection(ConnectionString);
-        conn.Open();
+        await conn.OpenAsync(ct);
 
         _logger.LogDebug("拉取 {ViewName}: ROW {StartRow} ~ {EndRow}", viewName, startRow, endRow);
 
@@ -81,39 +81,38 @@ public class OracleService
             WHERE rn BETWEEN :startRow AND :endRow
         ";
 
-        var result = conn.Query<BomSnapshot>(sql, new { startRow, endRow }).ToList();
-        _logger.LogDebug("拉取完成 {ViewName}: {Count} 条", viewName, result.Count);
-        return result;
+        var result = await conn.QueryAsync<BomSnapshot>(new CommandDefinition(sql, new { startRow, endRow }, cancellationToken: ct));
+        var list = result.ToList();
+        _logger.LogDebug("拉取完成 {ViewName}: {Count} 条", viewName, list.Count);
+        return list;
     }
 
     /// <summary>
-    /// 测试Oracle连接
+    /// 测试Oracle连接（异步）
     /// </summary>
-    public bool TestConnection(out string error)
+    public async Task<(bool Success, string Error)> TestConnectionAsync()
     {
         try
         {
             _logger.LogInformation("测试 Oracle 连接...");
             using var conn = new OracleConnection(ConnectionString);
-            conn.Open();
-            error = string.Empty;
+            await conn.OpenAsync();
             _logger.LogInformation("Oracle 连接成功");
-            return true;
+            return (true, string.Empty);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Oracle 连接失败");
-            error = ex.Message;
-            return false;
+            return (false, ex.Message);
         }
     }
 
     /// <summary>
-    /// 获取视图总页数
+    /// 获取视图总页数（异步）
     /// </summary>
-    public long GetTotalPages(string viewName, CancellationToken ct)
+    public async Task<long> GetTotalPagesAsync(string viewName, CancellationToken ct)
     {
-        var total = GetTotalCount(viewName, ct);
+        var total = await GetTotalCountAsync(viewName, ct);
         var pages = (total + _pageSize - 1) / _pageSize;
         _logger.LogInformation("视图 {ViewName} 总页数: {Pages}", viewName, pages);
         return pages;
