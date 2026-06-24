@@ -1,0 +1,76 @@
+{
+  // 配置文件版本号，当前为 2.0 动态架构
+  "version": "2.0",
+
+  // 配置文件用途描述
+  "description": "BOM视图对比配置 —— 完全动态字段，视图字段集合可各不相同",
+
+  // 对比配置列表，可定义多组不同视图的对比规则
+  "comparisons": [
+    {
+      // 配置唯一标识，默认为 "default"
+      "id": "default",
+
+      // 旧版视图名称（Oracle 数据库中的视图名）
+      "oldViewName": "PVS_BOM",
+
+      // 新版视图名称（Oracle 数据库中的视图名）
+      "newViewName": "PVS_BOM2",
+
+      // 对比键字段：用于匹配新旧两版同一条 BOM 记录的唯一标识组合
+      "keyFields": ["ParentPartNo", "ChildPartNo"],
+
+      // 父项分组字段：父项聚合对比时按此字段 GROUP BY
+      "parentGroupField": "ParentPartNo",
+
+      // 父项展示字段：聚合表中用于显示父项附加信息的字段
+      "parentDisplayField": "ParentPartName",
+
+      // 差异比较字段：对比时检测此字段的值是否发生变化（如数量差异）
+      "compareField": "Quantity",
+
+      // 默认排序字段：查询结果按此顺序排列
+      "defaultOrderBy": ["ParentPartNo", "ChildPartNo"],
+
+      // 逻辑字段定义：声明本组对比所涉及的所有字段（不同对比组可以有不同的字段集合）
+      //   logicalName — 逻辑字段名（SQLite 列名 / C# 属性名）
+      //   displayName — 表格列头显示名（中文）
+      //   dataType     — SQLite 数据类型：TEXT / INTEGER / REAL
+      "fieldDefinitions": [
+        { "logicalName": "ParentPartNo",  "displayName": "父项图号", "dataType": "TEXT" },
+        { "logicalName": "ParentPartName","displayName": "父项名称", "dataType": "TEXT" },
+        { "logicalName": "ParentSource",  "displayName": "父项源",   "dataType": "TEXT" },
+        { "logicalName": "ChildPartNo",   "displayName": "子项图号", "dataType": "TEXT" },
+        { "logicalName": "ChildPartName", "displayName": "子项名称", "dataType": "TEXT" },
+        { "logicalName": "ChildSource",   "displayName": "子项源",   "dataType": "TEXT" },
+        { "logicalName": "Quantity",      "displayName": "数量",     "dataType": "REAL" }
+      ],
+
+      // 视图字段映射：定义每个视图的物理列名 → 逻辑字段名的映射关系
+      //   键名 = 逻辑字段名（对应 fieldDefinitions 中的 logicalName）
+      //   键值 = 该视图在 Oracle 中的实际列名（物理列名）
+      "viewMappings": {
+        // PVS_BOM 视图：此处使用中文列名作为映射示例
+        "PVS_BOM": {
+          "ParentPartNo":  "父项图号",
+          "ParentPartName":"父项名称",
+          "ParentSource":  "父项源",
+          "ChildPartNo":   "子项图号",
+          "ChildPartName": "子项名称",
+          "ChildSource":   "子项源",
+          "Quantity":      "数量"
+        },
+        // PVS_BOM2 视图：同名映射，若实际列名不同（如 PARENT_CODE）则改这里即可
+        "PVS_BOM2": {
+          "ParentPartNo":  "父项图号",
+          "ParentPartName":"父项名称",
+          "ParentSource":  "父项源",
+          "ChildPartNo":   "子项图号",
+          "ChildPartName": "子项名称",
+          "ChildSource":   "子项源",
+          "Quantity":      "数量"
+        }
+      }
+    }
+  ]
+}

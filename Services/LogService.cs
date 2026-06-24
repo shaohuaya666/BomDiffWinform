@@ -48,7 +48,7 @@ public static class LogService
                 : 30;
 
             // 日志目录：程序目录/logs/
-            LogDirectory = ConfigurationManager.AppSettings["LogDirectory"];
+            LogDirectory = ConfigurationManager.AppSettings["LogDirectory"] ?? "";
             if (string.IsNullOrWhiteSpace(LogDirectory) || !Path.IsPathRooted(LogDirectory))
             {
                 LogDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");

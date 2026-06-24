@@ -23,4 +23,11 @@
     <PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
   </ItemGroup>
 
+  <!-- 确保 bom_view_mappings.json 复制到输出目录 -->
+  <ItemGroup>
+    <None Update="bom_view_mappings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
