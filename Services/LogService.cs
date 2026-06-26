@@ -48,7 +48,7 @@ public static class LogService
                 : 30;
 
             // 日志目录：程序目录/logs/
-            LogDirectory = ConfigurationManager.AppSettings["LogDirectory"];
+            LogDirectory = ConfigurationManager.AppSettings["LogDirectory"] ?? "";
             if (string.IsNullOrWhiteSpace(LogDirectory) || !Path.IsPathRooted(LogDirectory))
             {
                 LogDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
@@ -68,17 +68,17 @@ public static class LogService
                 .Enrich.FromLogContext()
                 .Enrich.WithProperty("Application", "BomDiffWinform")
                 .Enrich.WithProperty("Version", "1.0.0")
-                // 文件输出：滚动按日，保留指定天数
-                .WriteTo.File(
+                // 异步文件输出：后台线程批量写入，不阻塞调用线程
+                .WriteTo.Async(a => a.File(
                     path: logFilePath,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: RetentionDays,
                     outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
                     encoding: System.Text.Encoding.UTF8,
                     fileSizeLimitBytes: 10 * 1024 * 1024  // 10MB
-                )
-                // 错误日志单独文件
-                .WriteTo.File(
+                ), bufferSize: 1000)
+                // 错误日志异步输出
+                .WriteTo.Async(a => a.File(
                     path: errorLogPath,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: RetentionDays,
@@ -86,7 +86,7 @@ public static class LogService
                     outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
                     encoding: System.Text.Encoding.UTF8,
                     fileSizeLimitBytes: 10 * 1024 * 1024
-                )
+                ), bufferSize: 1000)
                 // 控制台输出（调试时可在VS输出窗口查看）
                 .WriteTo.Console(
                     outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"

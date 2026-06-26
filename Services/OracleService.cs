@@ -7,125 +7,109 @@ using Oracle.ManagedDataAccess.Client;
 namespace BomDiffWinform.Services;
 
 /// <summary>
-/// Oracle数据库访问服务（分页拉取BOM视图数据）
+/// Oracle数据访问服务 (v2 全动态)
+/// 
+/// v2 改进：
+/// - 返回 DynamicBomRow 替代固定的 BomSnapshot
+/// - SQL 由 ViewMappingConfigService 动态生成
+/// - 完全解耦 Oracle 物理列名与后续处理
 /// </summary>
 public class OracleService
 {
     private readonly string _oldViewName;
     private readonly string _newViewName;
     private readonly int _pageSize;
+    private readonly ViewMappingConfigService _mappingService;
+    private readonly ComparisonConfig _comparisonCfg;
     private readonly ILogger _logger;
 
-    public OracleService()
+    public OracleService(ViewMappingConfigService mappingService)
     {
+        _mappingService = mappingService ?? throw new ArgumentNullException(nameof(mappingService));
         _logger = LogService.GetLogger<OracleService>();
 
-        _oldViewName = ConfigurationManager.AppSettings["OldViewName"] ?? "PVS_BOM";
-        _newViewName = ConfigurationManager.AppSettings["NewViewName"] ?? "PVS_BOM2";
+        _comparisonCfg = _mappingService.GetRequiredComparison();
+        _oldViewName = _comparisonCfg.OldViewName;
+        _newViewName = _comparisonCfg.NewViewName;
         _pageSize = int.TryParse(ConfigurationManager.AppSettings["PageSize"], out var ps) ? ps : 5000;
 
         _logger.LogInformation(
-            "OracleService 初始化: 旧视图={OldView}, 新视图={NewView}, 分页大小={PageSize}",
-            _oldViewName, _newViewName, _pageSize);
+            "OracleService 初始化: 旧={OldView}, 新={NewView}, 分页={PageSize}, 字段数={FieldCount}",
+            _oldViewName, _newViewName, _pageSize, _comparisonCfg.FieldDefinitions.Count);
     }
 
     public int PageSize => _pageSize;
     public string OldViewName => _oldViewName;
     public string NewViewName => _newViewName;
+    public ViewMappingConfigService MappingService => _mappingService;
 
     private string ConnectionString =>
         ConfigurationManager.AppSettings["OracleConnectionString"] ?? string.Empty;
 
-    /// <summary>
-    /// 获取视图总行数
-    /// </summary>
-    public long GetTotalCount(string viewName, CancellationToken ct)
+    /// <summary>获取视图总行数</summary>
+    public async Task<long> GetTotalCountAsync(string viewName, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
         using var conn = new OracleConnection(ConnectionString);
-        conn.Open();
-
-        var sql = $"SELECT COUNT(*) FROM {EscapeIdentifier(viewName)}";
-        var count = conn.ExecuteScalar<long>(sql);
-
-        _logger.LogInformation("视图 {ViewName} 总行数: {Count:N0}", viewName, count);
+        await conn.OpenAsync(ct);
+        var sql = _mappingService.BuildCountSql(viewName);
+        var count = await conn.ExecuteScalarAsync<long>(new CommandDefinition(sql, cancellationToken: ct));
+        _logger.LogInformation("视图 {View} 总行数: {Count:N0}", viewName, count);
         return count;
     }
 
     /// <summary>
-    /// 分页读取视图数据（中文列名 → 英文属性名映射）
+    /// 分页读取视图数据，返回 DynamicBomRow 列表。
+    /// Oracle 物理列名 → 逻辑字段名已由 SQL 中的 AS 别名完成，Dapper 动态映射。
     /// </summary>
-    public List<BomSnapshot> GetPageData(string viewName, long startRow, long endRow, CancellationToken ct)
+    public async Task<List<DynamicBomRow>> GetPageDataAsync(string viewName, long startRow, long endRow, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-
         using var conn = new OracleConnection(ConnectionString);
-        conn.Open();
+        await conn.OpenAsync(ct);
+        _logger.LogDebug("拉取 {View}: ROW {Start} ~ {End}", viewName, startRow, endRow);
 
-        _logger.LogDebug("拉取 {ViewName}: ROW {StartRow} ~ {EndRow}", viewName, startRow, endRow);
+        var sql = _mappingService.BuildPagedQuerySql(_comparisonCfg, viewName);
 
-        // 使用 ROW_NUMBER() 分页，并别名映射中文列名到英文属性名
-        var sql = $@"
-            SELECT 父项图号 AS ParentPartNo,
-                   父项名称 AS ParentPartName,
-                   父项源 AS ParentSource,
-                   子项图号 AS ChildPartNo,
-                   子项名称 AS ChildPartName,
-                   子项源 AS ChildSource,
-                   数量 AS Quantity
-            FROM (
-                SELECT t.*, ROW_NUMBER() OVER (ORDER BY 父项图号, 子项图号) rn
-                FROM {EscapeIdentifier(viewName)} t
-            )
-            WHERE rn BETWEEN :startRow AND :endRow
-        ";
+        // Dapper Query<dynamic> → 转换为 DynamicBomRow
+        var dynamicRows = await conn.QueryAsync(
+            new CommandDefinition(sql, new { startRow, endRow }, cancellationToken: ct));
 
-        var result = conn.Query<BomSnapshot>(sql, new { startRow, endRow }).ToList();
-        _logger.LogDebug("拉取完成 {ViewName}: {Count} 条", viewName, result.Count);
+        var result = new List<DynamicBomRow>();
+        foreach (var dRow in dynamicRows)
+        {
+            var bomRow = new DynamicBomRow();
+            var dict = (IDictionary<string, object>)dRow;
+            foreach (var field in _comparisonCfg.FieldDefinitions)
+            {
+                if (dict.TryGetValue(field.LogicalName, out var value))
+                    bomRow.SetValue(field.LogicalName, value);
+            }
+            result.Add(bomRow);
+        }
+
+        _logger.LogDebug("拉取完成 {View}: {Count} 条", viewName, result.Count);
         return result;
     }
 
-    /// <summary>
-    /// 测试Oracle连接
-    /// </summary>
-    public bool TestConnection(out string error)
+    public async Task<(bool Success, string Error)> TestConnectionAsync()
     {
         try
         {
-            _logger.LogInformation("测试 Oracle 连接...");
             using var conn = new OracleConnection(ConnectionString);
-            conn.Open();
-            error = string.Empty;
-            _logger.LogInformation("Oracle 连接成功");
-            return true;
+            await conn.OpenAsync();
+            return (true, string.Empty);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Oracle 连接失败");
-            error = ex.Message;
-            return false;
+            return (false, ex.Message);
         }
     }
 
-    /// <summary>
-    /// 获取视图总页数
-    /// </summary>
-    public long GetTotalPages(string viewName, CancellationToken ct)
+    public async Task<long> GetTotalPagesAsync(string viewName, CancellationToken ct)
     {
-        var total = GetTotalCount(viewName, ct);
-        var pages = (total + _pageSize - 1) / _pageSize;
-        _logger.LogInformation("视图 {ViewName} 总页数: {Pages}", viewName, pages);
-        return pages;
-    }
-
-    private static string EscapeIdentifier(string name)
-    {
-        // 防止SQL注入：只允许字母、数字、下划线
-        if (string.IsNullOrWhiteSpace(name) || !System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z0-9_]+$"))
-        {
-            throw new ArgumentException($"无效的视图名称: {name}");
-        }
-        return name;
+        var total = await GetTotalCountAsync(viewName, ct);
+        return (total + _pageSize - 1) / _pageSize;
     }
 }
